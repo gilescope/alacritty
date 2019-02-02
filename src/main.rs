@@ -115,11 +115,11 @@ fn load_config(options: &cli::Options) -> Config {
     }
 }
 
-fn first_col(grid: &Grid<Cell>) -> Vec<char> {
+fn first_col(grid: &Grid<Cell>, debug_col: usize) -> Vec<char> {
     let mut vec = Vec::new();
     let height = grid.num_lines().0;
     for row_index in 0..height {
-        vec.push(grid[Line(row_index)][Column(0)].c);
+        vec.push(grid[Line(row_index)][Column(debug_col)].c);
     }
     vec
 }
@@ -143,7 +143,7 @@ fn first_col(grid: &Grid<Cell>) -> Vec<char> {
 ///
 ///
 ///
-///
+/// If change detected, wait x ticks to ensure no more changes coming through....
 ///
 /// Trail styles:
 ///    * random alphanumerics (actual char at end)
@@ -164,6 +164,24 @@ fn screen_shot(grid: &Grid<Cell>) -> Vec<Vec<char>> {
         original_columns.push(column);
     }
     original_columns
+}
+
+/// Compare a previous snapshot to the current grid and find the lowest row for each column where
+/// there is a difference.
+fn calc_lowest_char_changed_per_col(grid: &Grid<Cell>, orig: &Vec<Vec<char>>) -> Vec<usize> {
+    let mut lowest_char_changed_per_col = Vec::with_capacity(orig.len());
+    for col_index in 0..orig.len() {
+        let col = &orig[col_index];
+        let mut index = col.len();
+        for row_index in (0..col.len()).rev() {
+            if grid[Line(row_index)][Column(col_index)].c != col[row_index] {
+                index = row_index;
+                break;//todo: functional style
+            }
+        }
+        lowest_char_changed_per_col.push(index);
+    }
+    lowest_char_changed_per_col
 }
 
 /// Run Alacritty
@@ -276,8 +294,14 @@ fn run(
     let notifier = display.notifier();
     thread::spawn(move || {
         let mut columns : Vec<Vec<(char, bool)>> = vec![];
+        let mut snapshots = vec![];
         let mut original_columns = None;
+        let mut tick : u64 = 0;
+        let mut last_change_detected : u64 = 0;
+
+        let debug_col = 3;
         loop {
+            tick += 1;
             thread::sleep(std::time::Duration::from_millis(40));//lower this as height increases...
             // Process input and window events
             {
@@ -286,7 +310,7 @@ fn run(
                     if columns.is_empty() {
                         let grid: &mut Grid<Cell> = term_lock.grid_mut();//TODO: use   self.grid.region_mut(..).each(|c| c...);
                         original_columns = Some(screen_shot(grid));
-                        println!("initi {:?}", original_columns.clone().unwrap()[0]);
+                        println!("initi {:?}", original_columns.clone().unwrap()[debug_col]);
                     }
 
 //                    if let Some(original_columns2) = original_columns {
@@ -299,6 +323,9 @@ fn run(
                     let width = grid.num_cols().0;
                     let height = grid.num_lines().0;
                     let mut lowest_char_changed_per_col = vec![];
+                    for i in 0..width {
+                        lowest_char_changed_per_col.push(0);
+                    }
 
                     if !columns.is_empty() {
                         //is same size?
@@ -326,8 +353,9 @@ fn run(
                             //Undo our changes!
                             let orig = original_columns.clone().unwrap();
                             println!("change detected!");
-                            println!("origi: {:?}", &orig[0]);
-                            println!("scren: {:?}", first_col(grid));
+                            last_change_detected = tick;
+                            println!("origi: {:?}", &orig[debug_col]);
+                            println!("scren: {:?}", first_col(grid,debug_col));
 
                             for col_index in 0..width {
                                 let col = &columns[col_index];
@@ -348,31 +376,32 @@ fn run(
                             }
 
                             //Any changes left should be changes that we want to represent... between grid and orig.
-                            lowest_char_changed_per_col.clear();
-                            for col_index in 0..width {
-                                let col = &orig[col_index];
-                                let mut index = height;
-                                for row_index in (0..height).rev() {
-                                    if grid[Line(row_index)][Column(col_index)].c != col[row_index] {
-                                        index = row_index;
-                                        break;//todo: functional style
-                                    }
-                                }
-                                lowest_char_changed_per_col.push(index);
-                            }
+                            lowest_char_changed_per_col = calc_lowest_char_changed_per_col(&grid, &orig);
                             //dbg!(lowest_char_changed_per_col);
                             println!("lowest: {:?}", &lowest_char_changed_per_col);
-
-                            println!("scre2: {:?}", first_col(grid));
-
-                            original_columns = Some(screen_shot(grid));
-                            println!("origi: {:?}", original_columns.clone().unwrap()[0]);
+                            println!("scre2: {:?}", first_col(grid,debug_col));
+                            let screen = screen_shot(grid);
+                            original_columns = Some(screen.clone());
+                            snapshots.push(screen);
+                            //when multiple changes come in rapid procession....
+                            println!("origi: {:?}", original_columns.clone().unwrap()[debug_col]);
                             columns.clear()
                         }
                     }
 
-                    if columns.is_empty() {
+                    if columns.is_empty() && dbg!(last_change_detected) + 2 <= dbg!(tick) {
                         println!("setup random chars...");
+                        lowest_char_changed_per_col = if snapshots.is_empty() {
+                            let mut lowest_char_changed_per_col = vec![];
+                            for i in 0..width {
+                                lowest_char_changed_per_col.push(0);
+                            }
+                            lowest_char_changed_per_col
+                        }
+                        else {
+                            calc_lowest_char_changed_per_col(&grid, &snapshots[0])
+                        };
+                        snapshots.clear();
 
                         for col_index in 0..width {
                             let mut column = Vec::new();
@@ -400,10 +429,6 @@ fn run(
                                     }
                                 }
                             }
-                            //Empty screen at start:
-//                            for _ in 0..height {
-//                                column.push((' ', false));
-//                            }
                             columns.push(column);
                         }
                         println!("prep done");
@@ -436,6 +461,11 @@ fn run(
                                 let (ch, _real) = columns[col_index][relative_index];
                                 grid[Line(row)][Column(col_index)].c = ch;
                             }
+                        }
+                    } else {
+                        if snapshots.is_empty() {
+                            //record the resting state, that we can calc diffs from it.
+                            snapshots.push(screen_shot(grid));
                         }
                     }
                 }

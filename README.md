@@ -1,5 +1,8 @@
-Alacritty
-=========
+Alactrix
+========
+
+A fork of Alacritty. Alacritty was too fast so it has been slowed down and made a bit more like a futuristic matrix terminal.
+EOM
 
 [![Travis build Status](https://travis-ci.org/jwilm/alacritty.svg?branch=master)](https://travis-ci.org/jwilm/alacritty)
 [![Appveyor build Status](https://ci.appveyor.com/api/projects/status/github/jwilm/alacritty?svg=true)](https://ci.appveyor.com/project/jwilm/alacritty)

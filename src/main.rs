@@ -35,6 +35,7 @@ use rand::Rng;
 
 use std::error::Error;
 use std::sync::Arc;
+use std::thread;
 
 #[cfg(target_os = "macos")]
 use std::env;
@@ -55,6 +56,8 @@ use alacritty::term::Term;
 use alacritty::tty::{self, process_should_exit};
 use alacritty::util::fmt::Red;
 use alacritty::index::{Line, Column};
+use alacritty::Grid;
+use alacritty::term::Cell;
 
 fn main() {
     panic::attach_handler();
@@ -110,6 +113,57 @@ fn load_config(options: &cli::Options) -> Config {
         error!("Unable to write the default config");
         Config::default()
     }
+}
+
+fn first_col(grid: &Grid<Cell>) -> Vec<char> {
+    let mut vec = Vec::new();
+    let height = grid.num_lines().0;
+    for row_index in 0..height {
+        vec.push(grid[Line(row_index)][Column(0)].c);
+    }
+    vec
+}
+
+
+/// Plan
+///
+///
+/// landed = original_snapshot []
+/// ^
+/// |
+/// | Diff: chars to update...
+/// |
+/// V
+/// updated_snapshot []
+/// (gradually landed => updated_snapshot row by row from bottom upwards...)
+///
+///
+/// overlay vector per column... 0=alpha channel, use progress where alpha
+///
+///
+///
+///
+///
+///
+/// Trail styles:
+///    * random alphanumerics (actual char at end)
+///    * case switcher
+///    * lazer left-rigth art deco criss cross????
+///
+fn screen_shot(grid: &Grid<Cell>) -> Vec<Vec<char>> {
+    let mut original_columns = vec![];
+    println!("initialising");
+    let width = grid.num_cols().0;
+    let height = grid.num_lines().0;
+
+    for col_index in 0..width {
+        let mut column = Vec::new();
+        for row in 0..height {
+            column.push(grid[Line(row)][Column(col_index)].c);
+        }
+        original_columns.push(column);
+    }
+    original_columns
 }
 
 /// Run Alacritty
@@ -218,20 +272,30 @@ fn run(
 
     info!("Initialisation complete");
 
-    use std::thread;
-
     let c_term = terminal.clone();
     let notifier = display.notifier();
     thread::spawn(move || {
         let mut columns : Vec<Vec<(char, bool)>> = vec![];
+        let mut original_columns = None;
         loop {
-            thread::sleep_ms(40);
+            thread::sleep(std::time::Duration::from_millis(40));//lower this as height increases...
             // Process input and window events
             {
-               // println!("tick");
                 let mut term_lock = (*c_term).lock();
                 {
-                    let grid = term_lock.grid_mut();
+                    if columns.is_empty() {
+                        let grid: &mut Grid<Cell> = term_lock.grid_mut();//TODO: use   self.grid.region_mut(..).each(|c| c...);
+                        original_columns = Some(screen_shot(grid));
+                        println!("initi {:?}", original_columns.clone().unwrap()[0]);
+                    }
+
+//                    if let Some(original_columns2) = original_columns {
+//                        println!("initialising-undo");
+//                        term_lock.undo = Some(alacritty::term::MatrixUndo{ original_columns:original_columns2});
+//                        original_columns = None;
+//                    }
+
+                    let grid = term_lock.grid_mut();//TODO: use   self.grid.region_mut(..).each(|c| c...);
                     let width = grid.num_cols().0;
                     let height = grid.num_lines().0;
 
@@ -257,28 +321,63 @@ fn run(
                                 }
                             }
                         }
-                        if dirty { columns.clear() }
+                        if dirty {
+                            //Undo our changes!
+                            let orig = original_columns.clone().unwrap();
+                            println!("change detected!");
+                            println!("origi: {:?}", &orig[0]);
+                            println!("scren: {:?}", first_col(grid));
+
+                            for col_index in 0..width {
+                                let col = &columns[col_index];
+                                for row_index in 0..height {
+                                    let relative_index = (col.len() - height) + row_index;
+                                    //    println!("r{},c{}", relative_index, col_index);
+                                    let (matrix_ch, _real) = columns[col_index][relative_index];
+                                    let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
+                                    let original_ch = orig[col_index][row_index];
+                                    if current_screen_buffer_ch == matrix_ch && matrix_ch != original_ch {
+                                        //This char hasn't changed other than by us (probably?)
+                                        // - we should change it back to what it was...
+                                        grid[Line(row_index)][Column(col_index)].c = orig[col_index][row_index];
+                                    }
+                                }
+                            }
+                            println!("scre2: {:?}", first_col(grid));
+
+                            original_columns = Some(screen_shot(grid));
+                            println!("initi {:?}", original_columns.clone().unwrap()[0]);
+                            columns.clear()
+                        }
                     }
 
                     if columns.is_empty() {
-                        println!("initialising");
+                        println!("triump");
+
                         for col_index in 0..width {
                             let mut column = Vec::new();
-                            for row_index in 0..height {
+                            for row_index in (0..height)/*.step_by(2)*/ {
                          //       println!("char{} at {},{}",grid[Line(row_index)][Column(col_index)].c, row_index, col_index);
-                                column.push((grid[Line(row_index)][Column(col_index)].c, true));
+                                let ch = grid[Line(row_index)][Column(col_index)].c;
+                                column.push((ch, true));
 
                                 //Random chars:
-                                for _ in 0..rand::thread_rng().gen_range(2,10)
-                                {
-                                    let ch_int: u8 = rand::thread_rng()
-                                        .gen_range(31, 126);
-                                    column.push((ch_int as char, false));
-                                }
+                                if ch != ' ' {
+                                    //TODO less random chars if many chars on that column relative to spaces....
+                                    for _ in 0..rand::thread_rng().gen_range(2, 10)
+                                        {
+                                            let ch_int: u8 = rand::thread_rng()
+                                                .gen_range(31, 126);
+                                            column.push((ch_int as char, false));
+                                        }
 
-                                //Char Gap:
-                                for _ in 0..rand::thread_rng().gen_range(2,20) {
-                                    column.push((' ', false));
+//                                if row_index + 1 <= height {
+//                                    column.push((grid[Line(row_index + 1)][Column(col_index)].c, true));
+//                                }
+                                    //Char Gap:
+                                    for _ in 0..rand::thread_rng().gen_range(2, 20) {
+                                        column.push((' ', false));
+                                    }
                                 }
                             }
                             //Empty screen at start:
@@ -332,7 +431,6 @@ fn run(
     loop {
         // Process input and window events
         let mut terminal_lock = processor.process_events(&terminal, display.window());
-
         // Handle config reloads
         if let Some(new_config) = config_monitor
             .as_ref()

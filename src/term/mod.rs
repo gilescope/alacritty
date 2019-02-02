@@ -794,7 +794,30 @@ pub struct Term {
 
     /// Proxy object for clearing displayed errors and warnings
     logger_proxy: Option<LoggerProxy>,
+
+    pub undo: Option<MatrixUndo>,
 }
+
+#[derive(Clone)]
+pub struct MatrixUndo {
+    pub original_columns : Vec<Vec<char>>
+}
+
+impl MatrixUndo {
+    fn undo(&self, grid: &mut Grid<Cell>) {
+        println!("undo called {:?}", &self.original_columns[0]);
+//        for col_index in 0..self.original_columns.len() {
+//            let col = &self.original_columns[col_index];
+//            for row_index in 0..col.len() {
+//                grid[Line(row_index)][Column(col_index)].c = col[row_index];
+//            }
+//        }
+    }
+}
+
+//pub trait Undoable {
+//    fn undo();
+//}
 
 /// Terminal size info
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -929,6 +952,7 @@ impl Term {
             tabspaces,
             auto_scroll: config.scrolling().auto_scroll,
             logger_proxy: None,
+            undo: None,
         }
     }
 
@@ -1346,6 +1370,13 @@ impl ansi::Handler for Term {
     /// A character to be displayed
     #[inline]
     fn input(&mut self, c: char) {
+
+        //TODO revert any in progress effects...
+        if let Some(undo) = &self.undo.clone() {
+            undo.undo( self.grid_mut());
+            self.undo = None;
+        }
+
         // If enabled, scroll to bottom when character is received
         if self.auto_scroll {
             self.scroll_display(Scroll::Bottom);

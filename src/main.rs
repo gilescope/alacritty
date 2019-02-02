@@ -172,10 +172,10 @@ fn calc_lowest_char_changed_per_col(grid: &Grid<Cell>, orig: &Vec<Vec<char>>) ->
     let mut lowest_char_changed_per_col = Vec::with_capacity(orig.len());
     for col_index in 0..orig.len() {
         let col = &orig[col_index];
-        let mut index = col.len();
+        let mut index = 0;//col.len();
         for row_index in (0..col.len()).rev() {
             if grid[Line(row_index)][Column(col_index)].c != col[row_index] {
-                index = row_index;
+                index = dbg!(row_index);
                 break;//todo: functional style
             }
         }
@@ -323,7 +323,7 @@ fn run(
                     let width = grid.num_cols().0;
                     let height = grid.num_lines().0;
                     let mut lowest_char_changed_per_col = vec![];
-                    for i in 0..width {
+                    for _ in 0..width {
                         lowest_char_changed_per_col.push(0);
                     }
 
@@ -393,7 +393,7 @@ fn run(
                         println!("setup random chars...");
                         lowest_char_changed_per_col = if snapshots.is_empty() {
                             let mut lowest_char_changed_per_col = vec![];
-                            for i in 0..width {
+                            for _ in 0..width {
                                 lowest_char_changed_per_col.push(0);
                             }
                             lowest_char_changed_per_col
@@ -405,15 +405,22 @@ fn run(
 
                         for col_index in 0..width {
                             let mut column = Vec::new();
-                            for row_index in (0..height)/*.step_by(2)*/ {
-                         //       println!("char{} at {},{}",grid[Line(row_index)][Column(col_index)].c, row_index, col_index);
+
+                            let mut interesting_chars = 0;
+                            for row_index in 0..dbg!(lowest_char_changed_per_col[col_index]) {
+                                let ch = grid[Line(row_index)][Column(col_index)].c;
+                                if ch != ' ' { interesting_chars += 1 }
+                            }
+                            let work_ratio =  height / std::cmp::max(dbg!(interesting_chars), 1);
+
+                            for row_index in 0..height {
                                 let ch = grid[Line(row_index)][Column(col_index)].c;
                                 column.push((ch, true));
 
                                 //Add random chars...
-                                if ch != ' ' && row_index >= lowest_char_changed_per_col[col_index] {
+                                if ch != ' ' && row_index < lowest_char_changed_per_col[col_index] {
                                     //TODO less random chars if many chars on that column relative to spaces....
-                                    for _ in 0..rand::thread_rng().gen_range(2, 10)
+                                    for _ in 0..rand::thread_rng().gen_range(2, std::cmp::max(1 * work_ratio,3))
                                         {
                                             let ch_int: u8 = rand::thread_rng()
                                                 .gen_range(31, 126);
@@ -424,7 +431,7 @@ fn run(
 //                                    column.push((grid[Line(row_index + 1)][Column(col_index)].c, true));
 //                                }
                                     //Char Gap:
-                                    for _ in 0..rand::thread_rng().gen_range(2, 5) {
+                                    for _ in 0..rand::thread_rng().gen_range(2, std::cmp::max(1 * work_ratio,3)) {
                                         column.push((' ', false));
                                     }
                                 }

@@ -298,6 +298,7 @@ fn run(
                     let grid = term_lock.grid_mut();//TODO: use   self.grid.region_mut(..).each(|c| c...);
                     let width = grid.num_cols().0;
                     let height = grid.num_lines().0;
+                    let mut lowest_char_changed_per_col = vec![];
 
                     if !columns.is_empty() {
                         //is same size?
@@ -333,9 +334,11 @@ fn run(
                                 for row_index in 0..height {
                                     let relative_index = (col.len() - height) + row_index;
                                     //    println!("r{},c{}", relative_index, col_index);
+
                                     let (matrix_ch, _real) = columns[col_index][relative_index];
                                     let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
                                     let original_ch = orig[col_index][row_index];
+
                                     if current_screen_buffer_ch == matrix_ch && matrix_ch != original_ch {
                                         //This char hasn't changed other than by us (probably?)
                                         // - we should change it back to what it was...
@@ -343,16 +346,33 @@ fn run(
                                     }
                                 }
                             }
+
+                            //Any changes left should be changes that we want to represent... between grid and orig.
+                            lowest_char_changed_per_col.clear();
+                            for col_index in 0..width {
+                                let col = &orig[col_index];
+                                let mut index = height;
+                                for row_index in (0..height).rev() {
+                                    if grid[Line(row_index)][Column(col_index)].c != col[row_index] {
+                                        index = row_index;
+                                        break;//todo: functional style
+                                    }
+                                }
+                                lowest_char_changed_per_col.push(index);
+                            }
+                            //dbg!(lowest_char_changed_per_col);
+                            println!("lowest: {:?}", &lowest_char_changed_per_col);
+
                             println!("scre2: {:?}", first_col(grid));
 
                             original_columns = Some(screen_shot(grid));
-                            println!("initi {:?}", original_columns.clone().unwrap()[0]);
+                            println!("origi: {:?}", original_columns.clone().unwrap()[0]);
                             columns.clear()
                         }
                     }
 
                     if columns.is_empty() {
-                        println!("triump");
+                        println!("setup random chars...");
 
                         for col_index in 0..width {
                             let mut column = Vec::new();
@@ -361,8 +381,8 @@ fn run(
                                 let ch = grid[Line(row_index)][Column(col_index)].c;
                                 column.push((ch, true));
 
-                                //Random chars:
-                                if ch != ' ' {
+                                //Add random chars...
+                                if ch != ' ' && row_index >= lowest_char_changed_per_col[col_index] {
                                     //TODO less random chars if many chars on that column relative to spaces....
                                     for _ in 0..rand::thread_rng().gen_range(2, 10)
                                         {
@@ -375,15 +395,15 @@ fn run(
 //                                    column.push((grid[Line(row_index + 1)][Column(col_index)].c, true));
 //                                }
                                     //Char Gap:
-                                    for _ in 0..rand::thread_rng().gen_range(2, 20) {
+                                    for _ in 0..rand::thread_rng().gen_range(2, 5) {
                                         column.push((' ', false));
                                     }
                                 }
                             }
                             //Empty screen at start:
-                            for _ in 0..height {
-                                column.push((' ', false));
-                            }
+//                            for _ in 0..height {
+//                                column.push((' ', false));
+//                            }
                             columns.push(column);
                         }
                         println!("prep done");

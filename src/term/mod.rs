@@ -1128,7 +1128,7 @@ impl Term {
     }
 
     // Mutable access for swapping out the grid during tests
-    #[cfg(test)]
+    //#[cfg(test)]
     pub fn grid_mut(&mut self) -> &mut Grid<Cell> {
         &mut self.grid
     }

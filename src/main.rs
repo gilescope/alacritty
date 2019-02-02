@@ -31,6 +31,8 @@ use winapi::um::wincon::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
 use log::{info, error};
 
+use rand::Rng;
+
 use std::error::Error;
 use std::sync::Arc;
 
@@ -52,6 +54,7 @@ use alacritty::sync::FairMutex;
 use alacritty::term::Term;
 use alacritty::tty::{self, process_should_exit};
 use alacritty::util::fmt::Red;
+use alacritty::index::{Line, Column};
 
 fn main() {
     panic::attach_handler();
@@ -146,6 +149,7 @@ fn run(
     terminal.set_logger_proxy(logger_proxy.clone());
     let terminal = Arc::new(FairMutex::new(terminal));
 
+
     // Find the window ID for setting $WINDOWID
     let window_id = display.get_window_id();
 
@@ -214,6 +218,116 @@ fn run(
 
     info!("Initialisation complete");
 
+    use std::thread;
+
+    let c_term = terminal.clone();
+    let notifier = display.notifier();
+    thread::spawn(move || {
+        let mut columns : Vec<Vec<(char, bool)>> = vec![];
+        loop {
+            thread::sleep_ms(40);
+            // Process input and window events
+            {
+               // println!("tick");
+                let mut term_lock = (*c_term).lock();
+                {
+                    let grid = term_lock.grid_mut();
+                    let width = grid.num_cols().0;
+                    let height = grid.num_lines().0;
+
+                    if !columns.is_empty() {
+                        //is same size?
+                        let mut dirty = false;
+                        if columns.len() != width {
+                            dirty = true;
+                        } else if columns[0].iter().filter(| (_ch, real) | *real ).count() != height {
+                            dirty = true;
+                        } else {
+                            //Are the expected values still there? or is there new data...
+                            for col_index in 0..width {
+                                let col = &columns[col_index];
+                                for row in 0..height {
+                                    let relative_index = (col.len() - height) + row;
+                                    //    println!("r{},c{}", relative_index, col_index);
+                                    let (ch, _real) = columns[col_index][relative_index];
+                                    if grid[Line(row)][Column(col_index)].c != ch {
+                                        dirty = true;
+                                        break;//could break out of outer loop also
+                                    }
+                                }
+                            }
+                        }
+                        if dirty { columns.clear() }
+                    }
+
+                    if columns.is_empty() {
+                        println!("initialising");
+                        for col_index in 0..width {
+                            let mut column = Vec::new();
+                            for row_index in 0..height {
+                         //       println!("char{} at {},{}",grid[Line(row_index)][Column(col_index)].c, row_index, col_index);
+                                column.push((grid[Line(row_index)][Column(col_index)].c, true));
+
+                                //Random chars:
+                                for _ in 0..rand::thread_rng().gen_range(2,10)
+                                {
+                                    let ch_int: u8 = rand::thread_rng()
+                                        .gen_range(31, 126);
+                                    column.push((ch_int as char, false));
+                                }
+
+                                //Char Gap:
+                                for _ in 0..rand::thread_rng().gen_range(2,20) {
+                                    column.push((' ', false));
+                                }
+                            }
+                            //Empty screen at start:
+                            for _ in 0..height {
+                                column.push((' ', false));
+                            }
+                            columns.push(column);
+                        }
+                        println!("prep done");
+                    }
+
+                    //Step
+                    let mut found = false;
+                    for col in &mut columns {
+                        let mut index : usize = col.len() - 1;
+                        for (_ch, real) in col.iter().rev() {
+                            if !real || index == 0 {
+                                if !real {
+                                    found = true;
+                                }
+                                break;
+                            }
+                            index -= 1;
+                        }
+
+                        if index > 0 {
+                            col.remove(index);
+                        }
+                    }
+
+                    if found {
+                        for col_index in 0..width {
+                            let col = &columns[col_index];
+                            for row in 0..height {
+                                let relative_index = (col.len() - height) + row;
+                                let (ch, _real) = columns[col_index][relative_index];
+                                grid[Line(row)][Column(col_index)].c = ch;
+                            }
+                        }
+                    }
+                }
+
+                notifier.notify();
+                term_lock.dirty = true;
+            }
+
+        }
+    });
+
     // Main display loop
     loop {
         // Process input and window events
@@ -230,6 +344,7 @@ fn run(
             terminal_lock.update_config(&config);
             terminal_lock.dirty = true;
         }
+
 
         // Maybe draw the terminal
         if terminal_lock.needs_draw() {

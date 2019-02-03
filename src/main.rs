@@ -138,6 +138,7 @@ fn first_col(grid: &Grid<Cell>, debug_col: usize) -> Vec<char> {
 /// (gradually landed => updated_snapshot row by row from bottom upwards...)
 ///
 ///
+///
 /// overlay vector per column... 0=alpha channel, use progress where alpha
 ///
 ///
@@ -149,8 +150,9 @@ fn first_col(grid: &Grid<Cell>, debug_col: usize) -> Vec<char> {
 ///    * random alphanumerics (actual char at end)
 ///    * case switcher
 ///    * lazer left-rigth art deco criss cross????
+///    * left to right refresh using underscore as a line that goes across....
 ///
-fn screen_shot(grid: &Grid<Cell>) -> Vec<Vec<char>> {
+fn screen_shot(grid: &Grid<Cell>) -> Vec<Vec<Cell>> {
     let mut original_columns = vec![];
     println!("initialising");
     let width = grid.num_cols().0;
@@ -159,7 +161,7 @@ fn screen_shot(grid: &Grid<Cell>) -> Vec<Vec<char>> {
     for col_index in 0..width {
         let mut column = Vec::new();
         for row in 0..height {
-            column.push(grid[Line(row)][Column(col_index)].c);
+            column.push(grid[Line(row)][Column(col_index)].clone());
         }
         original_columns.push(column);
     }
@@ -168,14 +170,14 @@ fn screen_shot(grid: &Grid<Cell>) -> Vec<Vec<char>> {
 
 /// Compare a previous snapshot to the current grid and find the lowest row for each column where
 /// there is a difference.
-fn calc_lowest_char_changed_per_col(grid: &Grid<Cell>, orig: &Vec<Vec<char>>) -> Vec<usize> {
+fn calc_lowest_char_changed_per_col(grid: &Grid<Cell>, orig: &Vec<Vec<Cell>>) -> Vec<usize> {
     let mut lowest_char_changed_per_col = Vec::with_capacity(orig.len());
     for col_index in 0..orig.len() {
         let col = &orig[col_index];
         let mut index = 0;//col.len();
         for row_index in (0..col.len()).rev() {
-            if grid[Line(row_index)][Column(col_index)].c != col[row_index] {
-                index = dbg!(row_index);
+            if grid[Line(row_index)][Column(col_index)].c != col[row_index].c {
+                index = row_index;
                 break;//todo: functional style
             }
         }
@@ -293,8 +295,8 @@ fn run(
     let c_term = terminal.clone();
     let notifier = display.notifier();
     thread::spawn(move || {
-        let mut columns : Vec<Vec<(char, bool)>> = vec![];
-        let mut snapshots = vec![];
+        let mut columns : Vec<Vec<(Cell, bool)>> = vec![];
+        let mut snapshots : Vec<Vec<Vec<Cell>>>= vec![];
         let mut original_columns = None;
         let mut tick : u64 = 0;
         let mut last_change_detected : u64 = 0;
@@ -316,7 +318,10 @@ fn run(
 //                    if let Some(original_columns2) = original_columns {
 //                        println!("initialising-undo");
 //                        term_lock.undo = Some(alacritty::term::MatrixUndo{ original_columns:original_columns2});
-//                        original_columns = None;
+////                        //RESET
+////                        columns.clear();
+////                        original_columns = None;
+////                        snapshots.clear();
 //                    }
 
                     let grid = term_lock.grid_mut();//TODO: use   self.grid.region_mut(..).each(|c| c...);
@@ -333,6 +338,7 @@ fn run(
                             columns[0].iter().filter(|(_ch, real)| *real).count() != height;
 
                         if has_been_resized {
+                            //RESET
                             columns.clear();
                             original_columns = None;
                             snapshots.clear();
@@ -348,13 +354,14 @@ fn run(
                                 let relative_index = (col.len() - height) + row;
                                 //    println!("r{},c{}", relative_index, col_index);
                                 let (ch, _real) = columns[col_index][relative_index];
-                                if grid[Line(row)][Column(col_index)].c != ch {
+                                if grid[Line(row)][Column(col_index)].c != ch.c {
                                     dirty = true;
                                     break;//could break out of outer loop also
                                 }
                             }
                         }
                         if dirty {
+                            //Using UNDO rather than this..
                             //Undo our changes!
                             println!("change detected!");
                             last_change_detected = tick;
@@ -371,10 +378,10 @@ fn run(
                                         let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
                                         let original_ch = orig[col_index][row_index];
 
-                                        if current_screen_buffer_ch == matrix_ch && matrix_ch != original_ch {
+                                        if current_screen_buffer_ch == matrix_ch.c && matrix_ch.c != original_ch.c {
                                             //This char hasn't changed other than by us (probably?)
                                             // - we should change it back to what it was...
-                                            grid[Line(row_index)][Column(col_index)].c = orig[col_index][row_index];
+                                            grid[Line(row_index)][Column(col_index)] = orig[col_index][row_index];
                                         }
                                     }
                                 }
@@ -390,7 +397,7 @@ fn run(
                         }
                     }
 
-                    if columns.is_empty() && dbg!(last_change_detected) + 2 <= dbg!(tick) {
+                    if columns.is_empty() && last_change_detected + 2 <= tick {
                         println!("setup random chars...");
                         lowest_char_changed_per_col = if snapshots.is_empty() {
                             let mut lowest_char_changed_per_col = vec![];
@@ -408,32 +415,40 @@ fn run(
                             let mut column = Vec::new();
 
                             let mut interesting_chars = 0;
-                            for row_index in 0..dbg!(lowest_char_changed_per_col[col_index]) {
+                            for row_index in 0..lowest_char_changed_per_col[col_index] {
                                 let ch = grid[Line(row_index)][Column(col_index)].c;
                                 if ch != ' ' { interesting_chars += 1 }
                             }
-                            let work_ratio =  height / (std::cmp::max(dbg!(interesting_chars), 1) * 2);
+                            let work_ratio =  height / (std::cmp::max(interesting_chars, 1) * 2);
 
                             for row_index in 0..height {
-                                let ch = grid[Line(row_index)][Column(col_index)].c;
-                                column.push((ch, true));
+                                let cell = grid[Line(row_index)][Column(col_index)];
+                                column.push((cell.clone(), true));
 
                                 //Add random chars...
-                                if ch != ' ' && row_index < lowest_char_changed_per_col[col_index] {
+                                if cell.c != ' ' && row_index < lowest_char_changed_per_col[col_index] {
                                     //TODO less random chars if many chars on that column relative to spaces....
-                                    for _ in 0..rand::thread_rng().gen_range(2, std::cmp::max(1 * work_ratio,3))
-                                        {
-                                            let ch_int: u8 = rand::thread_rng()
-                                                .gen_range(31, 126);
-                                            column.push((ch_int as char, false));
+                                    let ran_char_count = rand::thread_rng().gen_range(2, std::cmp::max(10, 3));
+                                    for i in 0..ran_char_count
+                                    {
+                                        let ch_int: u8 = rand::thread_rng()
+                                            .gen_range(31, 126);
+                                        let mut rnd_char = Cell::new(ch_int as char,
+                                                                     alacritty::ansi::Color::Spec(alacritty::Rgb{r:0, g:(150 + (ran_char_count-i) * 10),b:0}),
+                                                                     cell.bg);
+
+                                        if rand::thread_rng().gen_bool(0.2) {
+                                            use alacritty::term::cell::*;
+                                            rnd_char.flags = rnd_char.flags | Flags::BOLD; //todo this is bold...
                                         }
 
-//                                if row_index + 1 <= height {
-//                                    column.push((grid[Line(row_index + 1)][Column(col_index)].c, true));
-//                                }
+                                        column.push((rnd_char, false));
+                                    }
+
                                     //Char Gap:
-                                    for _ in 0..rand::thread_rng().gen_range(2, std::cmp::max(1 * work_ratio,3)) {
-                                        column.push((' ', false));
+                                    for _ in 0..rand::thread_rng().gen_range(2, std::cmp::max(8,3)) {
+                                        let space = Cell::new(' ', cell.fg, cell.bg);
+                                        column.push((space, false));
                                     }
                                 }
                             }
@@ -458,15 +473,16 @@ fn run(
 
                         if index > 0 {
                             //rather than remove index, we reduce screen churn if we remove the first random one....
-                            let mut idx = index;
+                            let idx = index;
 
-                            for i in (0..idx).rev() {
-                                let (_ch, real) = col[i];
-                                if real {
-                                    idx = i + 1;
-                                    break;
-                                }
-                            }
+                            //Didn's seem to help much...
+//                            for i in (0..idx).rev() {
+//                                let (_ch, real) = col[i];
+//                                if real {
+//                                    idx = i + 1;
+//                                    break;
+//                                }
+//                            }
 
                             col.remove(idx);
                         }
@@ -478,7 +494,7 @@ fn run(
                             for row in 0..height {
                                 let relative_index = (col.len() - height) + row;
                                 let (ch, _real) = columns[col_index][relative_index];
-                                grid[Line(row)][Column(col_index)].c = ch;
+                                grid[Line(row)][Column(col_index)] = ch;
                             }
                         }
                     } else {

@@ -301,8 +301,8 @@ fn run(
 
         let debug_col = 3;
         loop {
-            tick += 1;
-            thread::sleep(std::time::Duration::from_millis(40));//lower this as height increases...
+            tick += 1;//TODO tick overflow
+            thread::sleep(std::time::Duration::from_millis(30));//lower this as height increases...
             // Process input and window events
             {
                 let mut term_lock = (*c_term).lock();
@@ -329,62 +329,63 @@ fn run(
 
                     if !columns.is_empty() {
                         //is same size?
+                        let has_been_resized = columns.len() != width ||
+                            columns[0].iter().filter(|(_ch, real)| *real).count() != height;
+
+                        if has_been_resized {
+                            columns.clear();
+                            original_columns = None;
+                            snapshots.clear();
+                        }
+                    }
+
+                    if !columns.is_empty() {
                         let mut dirty = false;
-                        if columns.len() != width {
-                            dirty = true;
-                        } else if columns[0].iter().filter(| (_ch, real) | *real ).count() != height {
-                            dirty = true;
-                        } else {
-                            //Are the expected values still there? or is there new data...
-                            for col_index in 0..width {
-                                let col = &columns[col_index];
-                                for row in 0..height {
-                                    let relative_index = (col.len() - height) + row;
-                                    //    println!("r{},c{}", relative_index, col_index);
-                                    let (ch, _real) = columns[col_index][relative_index];
-                                    if grid[Line(row)][Column(col_index)].c != ch {
-                                        dirty = true;
-                                        break;//could break out of outer loop also
-                                    }
+                        //Are the expected values still there? or is there new data...
+                        for col_index in 0..width {
+                            let col = &columns[col_index];
+                            for row in 0..height {
+                                let relative_index = (col.len() - height) + row;
+                                //    println!("r{},c{}", relative_index, col_index);
+                                let (ch, _real) = columns[col_index][relative_index];
+                                if grid[Line(row)][Column(col_index)].c != ch {
+                                    dirty = true;
+                                    break;//could break out of outer loop also
                                 }
                             }
                         }
                         if dirty {
                             //Undo our changes!
-                            let orig = original_columns.clone().unwrap();
                             println!("change detected!");
                             last_change_detected = tick;
-                            println!("origi: {:?}", &orig[debug_col]);
-                            println!("scren: {:?}", first_col(grid,debug_col));
+                            if let Some(orig) = &original_columns {
+                                println!("origi: {:?}", &orig[debug_col]);
+                                println!("scren: {:?}", first_col(grid, debug_col));
+                                for col_index in 0..width {
+                                    let col = &columns[col_index];
+                                    for row_index in 0..height {
+                                        let relative_index = (col.len() - height) + row_index;
+                                        //    println!("r{},c{}", relative_index, col_index);
 
-                            for col_index in 0..width {
-                                let col = &columns[col_index];
-                                for row_index in 0..height {
-                                    let relative_index = (col.len() - height) + row_index;
-                                    //    println!("r{},c{}", relative_index, col_index);
+                                        let (matrix_ch, _real) = columns[col_index][relative_index];
+                                        let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
+                                        let original_ch = orig[col_index][row_index];
 
-                                    let (matrix_ch, _real) = columns[col_index][relative_index];
-                                    let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
-                                    let original_ch = orig[col_index][row_index];
-
-                                    if current_screen_buffer_ch == matrix_ch && matrix_ch != original_ch {
-                                        //This char hasn't changed other than by us (probably?)
-                                        // - we should change it back to what it was...
-                                        grid[Line(row_index)][Column(col_index)].c = orig[col_index][row_index];
+                                        if current_screen_buffer_ch == matrix_ch && matrix_ch != original_ch {
+                                            //This char hasn't changed other than by us (probably?)
+                                            // - we should change it back to what it was...
+                                            grid[Line(row_index)][Column(col_index)].c = orig[col_index][row_index];
+                                        }
                                     }
                                 }
                             }
 
                             //Any changes left should be changes that we want to represent... between grid and orig.
-                            lowest_char_changed_per_col = calc_lowest_char_changed_per_col(&grid, &orig);
-                            //dbg!(lowest_char_changed_per_col);
-                            println!("lowest: {:?}", &lowest_char_changed_per_col);
-                            println!("scre2: {:?}", first_col(grid,debug_col));
+                         //   println!("scre2: {:?}", first_col(grid,debug_col));
                             let screen = screen_shot(grid);
-                            original_columns = Some(screen.clone());
-                            snapshots.push(screen);
+                            original_columns = Some(screen);
                             //when multiple changes come in rapid procession....
-                            println!("origi: {:?}", original_columns.clone().unwrap()[debug_col]);
+                           // println!("origi: {:?}", original_columns.unwrap()[debug_col]);
                             columns.clear()
                         }
                     }
@@ -411,7 +412,7 @@ fn run(
                                 let ch = grid[Line(row_index)][Column(col_index)].c;
                                 if ch != ' ' { interesting_chars += 1 }
                             }
-                            let work_ratio =  height / std::cmp::max(dbg!(interesting_chars), 1);
+                            let work_ratio =  height / (std::cmp::max(dbg!(interesting_chars), 1) * 2);
 
                             for row_index in 0..height {
                                 let ch = grid[Line(row_index)][Column(col_index)].c;
@@ -456,7 +457,18 @@ fn run(
                         }
 
                         if index > 0 {
-                            col.remove(index);
+                            //rather than remove index, we reduce screen churn if we remove the first random one....
+                            let mut idx = index;
+
+                            for i in (0..idx).rev() {
+                                let (_ch, real) = col[i];
+                                if real {
+                                    idx = i + 1;
+                                    break;
+                                }
+                            }
+
+                            col.remove(idx);
                         }
                     }
 

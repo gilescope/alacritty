@@ -818,41 +818,39 @@ impl MatrixUndo {
     }
 }
 
-fn reset_back_to_previous(term: &mut Term) {
-    let orig = &term.undo.original_columns.clone();
-    let columns = &term.undo.columns.clone();
-    let grid = term.grid_mut();
-    let height = grid.num_lines().0;
-    let width = grid.num_cols().0;
-    if !orig.is_empty() {
-        for col_index in 0..width {
-            let col = &columns[col_index];
-            for row_index in 0..height {
-                let relative_index = std::cmp::max(col.len() - height, 0) + row_index;
-
-                let (matrix_ch, _real) = columns[col_index][relative_index];
-                let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
-                let original_ch = orig[col_index][row_index];
-
-                if current_screen_buffer_ch == matrix_ch.c && matrix_ch.c != original_ch.c {
-                    //This char hasn't changed other than by us (probably?)
-                    // - we should change it back to what it was...
-                    grid[Line(row_index)][Column(col_index)] = orig[col_index][row_index];
-                }
-            }
-        }
-    }
-
-    term.undo.columns.clear();
-}
 
 impl Term {
     fn undo(&mut self)
     {
-        if !&self.undo.columns.is_empty() {
-            self.undo.last_change_detected = self.undo.tick;
-            reset_back_to_previous(self);
+        if self.undo.columns.is_empty() {
+            return;
         }
+        self.undo.last_change_detected = self.undo.tick;
+        let orig = &self.undo.original_columns.clone();
+        let columns = &self.undo.columns.clone();
+        let grid = self.grid_mut();
+        let height = grid.num_lines().0;
+        let width = grid.num_cols().0;
+        if !orig.is_empty() {
+            for col_index in 0..width {
+                let col = &columns[col_index];
+                for row_index in 0..height {
+                    let relative_index = std::cmp::max(col.len() - height, 0) + row_index;
+
+                    let (matrix_ch, _real) = columns[col_index][relative_index];
+                    let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
+                    let original_ch = orig[col_index][row_index];
+
+                    if current_screen_buffer_ch == matrix_ch.c && matrix_ch.c != original_ch.c {
+                        //This char hasn't changed other than by us (probably?)
+                        // - we should change it back to what it was...
+                        grid[Line(row_index)][Column(col_index)] = orig[col_index][row_index];
+                    }
+                }
+            }
+        }
+
+        self.undo.columns.clear();
     }
 }
 

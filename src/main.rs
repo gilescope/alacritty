@@ -306,7 +306,7 @@ fn run(
                             let mut column = Vec::new();
 
                             for row_index in 0..height {
-                                let cell = term.grid_mut()[Line(row_index)][Column(col_index)];
+                                let cell = term.grid()[Line(row_index)][Column(col_index)];
                                 column.push((cell.clone(), true));
 
                                 //Add random chars...
@@ -367,7 +367,7 @@ fn run(
                             for row in 0..height {
                                 let relative_index = (col_len - height) + row;
                                 let (ch, _real) = term.undo.columns[col_index][relative_index];
-                                let cell = &term.grid_mut()[Line(row)][Column(col_index)];
+                                let cell = &term.grid()[Line(row)][Column(col_index)];
                                 if cell.c != ch.c {
                                     term.grid_mut()[Line(row)][Column(col_index)] = ch;
                                 }

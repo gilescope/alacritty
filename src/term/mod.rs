@@ -795,17 +795,88 @@ pub struct Term {
     /// Proxy object for clearing displayed errors and warnings
     logger_proxy: Option<LoggerProxy>,
 
-    pub undo: Option<MatrixUndo>,
+    pub undo: MatrixUndo,
 }
 
 #[derive(Clone)]
 pub struct MatrixUndo {
-    pub original_columns : Vec<Vec<char>>
+    pub tick : u64,
+    pub last_change_detected : u64,
+    pub original_columns : Vec<Vec<Cell>>,
+    pub columns: Vec<Vec<(Cell, bool)>>,
 }
 
 impl MatrixUndo {
-    fn undo(&self, _grid: &mut Grid<Cell>) {
-        println!("undo called {:?}", &self.original_columns[0]);
+    fn new() -> Self {
+        MatrixUndo {
+            tick: 0,
+            last_change_detected: 0,
+            original_columns: vec![],
+            columns: vec![]
+        }
+    }
+}
+
+fn screen_shot(grid: &Grid<Cell>) -> Vec<Vec<Cell>> {
+    let mut original_columns = vec![];
+    println!("initialising");
+    let width = grid.num_cols().0;
+    let height = grid.num_lines().0;
+
+    for col_index in 0..width {
+        let mut column = Vec::new();
+        for row in 0..height {
+            column.push(grid[Line(row)][Column(col_index)].clone());
+        }
+        original_columns.push(column);
+    }
+    original_columns
+}
+
+fn reset_back_to_previous(term: &mut Term) { //grid: &mut Grid<Cell>, orig: &Vec<Vec<Cell>>, columns: &Vec<Vec<(Cell, bool)>>) {
+    let orig=  &term.undo.original_columns.clone();
+    let columns= &term.undo.columns.clone();
+    let grid = term.grid_mut();
+    let height = grid.num_lines().0;
+    let width = grid.num_cols().0;
+    if !orig.is_empty() {
+        for col_index in 0..width {
+            let col = &columns[col_index];
+            for row_index in 0..height {
+                let relative_index = (col.len() - height) + row_index;
+                //    println!("r{},c{}", relative_index, col_index);
+
+                let (matrix_ch, _real) = columns[col_index][relative_index];
+                let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
+                let original_ch = orig[col_index][row_index];
+
+                //todo: Suspicious
+                if current_screen_buffer_ch == matrix_ch.c && matrix_ch.c != original_ch.c {
+                    //This char hasn't changed other than by us (probably?)
+                    // - we should change it back to what it was...
+                    grid[Line(row_index)][Column(col_index)] = orig[col_index][row_index];
+                }
+            }
+        }
+    }
+
+   // println!("reset back to prev, about take snap: ");
+   // let snap  =screen_shot(grid);
+    //Reset
+    term.undo.columns.clear();
+    //term.undo.original_columns = snap;
+}
+
+impl Term {
+    fn undo(&mut self) {
+        {
+            if !&self.undo.columns.is_empty() {
+                println!("change detected - undo called!");
+                reset_back_to_previous( self);
+                self.undo.last_change_detected = self.undo.tick;
+            }
+        }
+//        println!("undo called {:?}", &self.original_columns[0]);
 //        for col_index in 0..self.original_columns.len() {
 //            let col = &self.original_columns[col_index];
 //            for row_index in 0..col.len() {
@@ -952,7 +1023,7 @@ impl Term {
             tabspaces,
             auto_scroll: config.scrolling().auto_scroll,
             logger_proxy: None,
-            undo: None,
+            undo: MatrixUndo::new(),
         }
     }
 
@@ -1371,11 +1442,13 @@ impl ansi::Handler for Term {
     #[inline]
     fn input(&mut self, c: char) {
 
+        print!("{}", c);
+
         //TODO revert any in progress effects...
-        if let Some(undo) = &self.undo.clone() {
-            undo.undo( self.grid_mut());
-            self.undo = None;
-        }
+//        if let Some(undo) = &self.undo.clone() {
+            self.undo();
+  //          self.undo = None;
+  //      }
 
         // If enabled, scroll to bottom when character is received
         if self.auto_scroll {

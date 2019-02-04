@@ -57,7 +57,7 @@ use alacritty::tty::{self, process_should_exit};
 use alacritty::util::fmt::Red;
 use alacritty::index::{Line, Column};
 use alacritty::Grid;
-use alacritty::term::Cell;
+use alacritty::term::{Cell};
 
 fn main() {
     panic::attach_handler();
@@ -154,7 +154,7 @@ fn first_col(grid: &Grid<Cell>, debug_col: usize) -> Vec<char> {
 ///
 fn screen_shot(grid: &Grid<Cell>) -> Vec<Vec<Cell>> {
     let mut original_columns = vec![];
-    println!("initialising");
+    println!("sceenshot-taken");
     let width = grid.num_cols().0;
     let height = grid.num_lines().0;
 
@@ -185,6 +185,31 @@ fn calc_lowest_char_changed_per_col(grid: &Grid<Cell>, orig: &Vec<Vec<Cell>>) ->
     }
     lowest_char_changed_per_col
 }
+
+/// If grid != expected transition stage
+///
+//fn reset_back_to_previous(grid: &mut Grid<Cell>, orig: &Vec<Vec<Cell>>, columns: &Vec<Vec<(Cell, bool)>>) {
+//    let height = grid.num_lines().0;
+//    let width = grid.num_cols().0;
+//    for col_index in 0..width {
+//        let col = &columns[col_index];
+//        for row_index in 0..height {
+//            let relative_index = (col.len() - height) + row_index;
+//            //    println!("r{},c{}", relative_index, col_index);
+//
+//            let (matrix_ch, _real) = columns[col_index][relative_index];
+//            let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
+//            let original_ch = orig[col_index][row_index];
+//
+//            //todo: Suspicious
+//            if current_screen_buffer_ch == matrix_ch.c && matrix_ch.c != original_ch.c {
+//                //This char hasn't changed other than by us (probably?)
+//                // - we should change it back to what it was...
+//                grid[Line(row_index)][Column(col_index)] = orig[col_index][row_index];
+//            }
+//        }
+//    }
+//}
 
 /// Run Alacritty
 ///
@@ -295,138 +320,136 @@ fn run(
     let c_term = terminal.clone();
     let notifier = display.notifier();
     thread::spawn(move || {
-        let mut columns : Vec<Vec<(Cell, bool)>> = vec![];
-        let mut snapshots : Vec<Vec<Vec<Cell>>>= vec![];
-        let mut original_columns = None;
-        let mut tick : u64 = 0;
-        let mut last_change_detected : u64 = 0;
+//        let  columns_lock:  Arc<Mutex<Vec<Vec<(Cell, bool)>>>> = Arc::new(Mutex::new(vec![]));
+     //   let mut snapshots : Option<Vec<Vec<Cell>>>= None;//todo: this can just be option rather than vec.
+//        let mut original_columns = None;
 
         let debug_col = 3;
         loop {
-            tick += 1;//TODO tick overflow
-            thread::sleep(std::time::Duration::from_millis(30));//lower this as height increases...
+            thread::sleep(std::time::Duration::from_millis(40));//lower this as height increases...
             // Process input and window events
             {
-                let mut term_lock = (*c_term).lock();
+               let mut term_lock = (*c_term).lock();
+                term_lock.undo.tick += 1;//TODO tick overflow
+//        println!("tick: {} changed={}", term_lock.undo.tick, term_lock.undo.last_change_detected);
                 {
-                    if columns.is_empty() {
-                        let grid: &mut Grid<Cell> = term_lock.grid_mut();//TODO: use   self.grid.region_mut(..).each(|c| c...);
-                        original_columns = Some(screen_shot(grid));
-                        println!("initi {:?}", original_columns.clone().unwrap()[debug_col]);
-                    }
+//                            {
+//                        if term_lock.undo.columns.is_empty() {
+//                            let grid: &mut Grid<Cell> = term_lock.grid_mut();//TODO: use   self.grid.region_mut(..).each(|c| c...);
+//                            println!("cols empty, let's screnshot...");
+//                            term_lock.undo.original_columns = screen_shot(grid);
+//                       //     println!("initi {:?}", &term_lock.undo.original_columns[debug_col].iter().map(|x|x.c));
+//                        }
+//                            }
 
-//                    if let Some(original_columns2) = original_columns {
-//                        println!("initialising-undo");
-//                        term_lock.undo = Some(alacritty::term::MatrixUndo{ original_columns:original_columns2});
-////                        //RESET
-////                        columns.clear();
-////                        original_columns = None;
-////                        snapshots.clear();
-//                    }
+//                            if let None = term_lock.undo {
+//                                if let Some(original_columns2) = &original_columns {
+//                                    println!("initialising-undo");
+//                                    term_lock.undo = Some(
+//                                        alacritty::term::MatrixUndo {
+//                                            original_columns: original_columns2.clone(),
+//                                            current_columns: columns_lock.clone()
+//                                        });
+//                                }
+//                            }
 
-                    let grid = term_lock.grid_mut();//TODO: use   self.grid.region_mut(..).each(|c| c...);
-                    let width = grid.num_cols().0;
-                    let height = grid.num_lines().0;
-                    let mut lowest_char_changed_per_col = vec![];
-                    for _ in 0..width {
-                        lowest_char_changed_per_col.push(0);
-                    }
+                    //let grid = term_lock.grid_mut();//TODO: use   self.grid.region_mut(..).each(|c| c...);
+                    let width = term_lock.grid().num_cols().0;
+                    let height = term_lock.grid().num_lines().0;
+                //    let mut lowest_char_changed_per_col = vec![];
+//                            for _ in 0..width {
+//                                lowest_char_changed_per_col.push(0);
+//                            }
 
-                    if !columns.is_empty() {
-                        //is same size?
-                        let has_been_resized = columns.len() != width ||
-                            columns[0].iter().filter(|(_ch, real)| *real).count() != height;
+                            if !term_lock.undo.columns.is_empty() {
+                                //is same size?
+                                //TODO may not be needed as might be caught by otehr mechanism
+                                let has_been_resized = term_lock.undo.columns.len() != width ||
+                                    term_lock.undo.columns[0].iter().filter(|(_ch, real)| *real).count() != height;
 
-                        if has_been_resized {
-                            //RESET
-                            columns.clear();
-                            original_columns = None;
-                            snapshots.clear();
-                        }
-                    }
+                                if has_been_resized {
+                                    //RESET
 
-                    if !columns.is_empty() {
-                        let mut dirty = false;
-                        //Are the expected values still there? or is there new data...
-                        for col_index in 0..width {
-                            let col = &columns[col_index];
-                            for row in 0..height {
-                                let relative_index = (col.len() - height) + row;
-                                //    println!("r{},c{}", relative_index, col_index);
-                                let (ch, _real) = columns[col_index][relative_index];
-                                if grid[Line(row)][Column(col_index)].c != ch.c {
-                                    dirty = true;
-                                    break;//could break out of outer loop also
-                                }
-                            }
-                        }
-                        if dirty {
-                            //Using UNDO rather than this..
-                            //Undo our changes!
-                            println!("change detected!");
-                            last_change_detected = tick;
-                            if let Some(orig) = &original_columns {
-                                println!("origi: {:?}", &orig[debug_col]);
-                                println!("scren: {:?}", first_col(grid, debug_col));
-                                for col_index in 0..width {
-                                    let col = &columns[col_index];
-                                    for row_index in 0..height {
-                                        let relative_index = (col.len() - height) + row_index;
-                                        //    println!("r{},c{}", relative_index, col_index);
-
-                                        let (matrix_ch, _real) = columns[col_index][relative_index];
-                                        let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
-                                        let original_ch = orig[col_index][row_index];
-
-                                        if current_screen_buffer_ch == matrix_ch.c && matrix_ch.c != original_ch.c {
-                                            //This char hasn't changed other than by us (probably?)
-                                            // - we should change it back to what it was...
-                                            grid[Line(row_index)][Column(col_index)] = orig[col_index][row_index];
-                                        }
-                                    }
+                                    //term_lock.undo(); - would be nice but undo would need to deal with that.
+                                    term_lock.undo.columns.clear();
+                                    term_lock.undo.original_columns = screen_shot(term_lock.grid());
+                                    //snapshots.clear();
                                 }
                             }
 
-                            //Any changes left should be changes that we want to represent... between grid and orig.
-                         //   println!("scre2: {:?}", first_col(grid,debug_col));
-                            let screen = screen_shot(grid);
-                            original_columns = Some(screen);
-                            //when multiple changes come in rapid procession....
-                           // println!("origi: {:?}", original_columns.unwrap()[debug_col]);
-                            columns.clear()
-                        }
-                    }
+//                            if !term_lock.undo.columns.is_empty() {
+//                                let mut dirty = false;
+//                                //Are the expected values still there? or is there new data...
+//                                for col_index in 0..width {
+//                                    let col = &columns[col_index];
+//                                    for row in 0..height {
+//                                        let relative_index = (col.len() - height) + row;
+//                                        //    println!("r{},c{}", relative_index, col_index);
+//                                        let (ch, _real) = columns[col_index][relative_index];
+//                                        if grid[Line(row)][Column(col_index)].c != ch.c {
+//                                            dirty = true;
+//                                            break;//could break out of outer loop also
+//                                        }
+//                                    }
+//                                }
+//                                if dirty {
+//                                    //Using UNDO rather than this..
+//                                    //Undo our changes!
+//                          //          println!("change detected!");
+//                             //       last_change_detected = tick;
+////                                    if let Some(orig) = &original_columns {
+////                                        println!("change detected and not reset!");
+////                                       // reset_back_to_previous(&mut grid, orig, &columns);
+////
+//////                                        let snap = screen_shot(grid);
+//////                                        original_columns = Some(snap);
+//////                                        //Redo undo!!!!
+//////                                        term_lock.undo = Some(
+//////                                            alacritty::term::MatrixUndo {
+//////                                                original_columns: snap.clone(),
+//////                                                current_columns: columns_lock.clone()
+//////                                            });
+//////
+//////                                        columns.clear();
+////                                    }
+//
+//                                }
+//                            }
 
-                    if columns.is_empty() && last_change_detected + 2 <= tick {
+                    if term_lock.undo.columns.is_empty() && term_lock.undo.last_change_detected + 4 <= term_lock.undo.tick {
                         println!("setup random chars...");
-                        lowest_char_changed_per_col = if snapshots.is_empty() {
+                        let lowest_char_changed_per_col = if term_lock.undo.original_columns.is_empty() {
                             let mut lowest_char_changed_per_col = vec![];
                             for _ in 0..width {
-                                lowest_char_changed_per_col.push(0);
+                                lowest_char_changed_per_col.push(height);
                             }
                             lowest_char_changed_per_col
                         }
                         else {
-                            calc_lowest_char_changed_per_col(&grid, &snapshots[0])
+                            calc_lowest_char_changed_per_col(term_lock.grid(), & term_lock.undo.original_columns)
                         };
-                        snapshots.clear();
 
+                        //Must be set after calc lowest char......
+                        term_lock.undo.original_columns = screen_shot(term_lock.grid());
+                        //snapshots = None;
+ //                       let mut rnd =0;
                         for col_index in 0..width {
                             let mut column = Vec::new();
 
-                            let mut interesting_chars = 0;
-                            for row_index in 0..lowest_char_changed_per_col[col_index] {
-                                let ch = grid[Line(row_index)][Column(col_index)].c;
-                                if ch != ' ' { interesting_chars += 1 }
-                            }
-                            let work_ratio =  height / (std::cmp::max(interesting_chars, 1) * 2);
+//                            let mut interesting_chars = 0;
+//                            for row_index in 0..lowest_char_changed_per_col[col_index] {
+//                                let ch = grid[Line(row_index)][Column(col_index)].c;
+//                                if ch != ' ' { interesting_chars += 1 }
+//                            }
+                            //let work_ratio =  height / (std::cmp::max(interesting_chars, 1) * 2);
 
                             for row_index in 0..height {
-                                let cell = grid[Line(row_index)][Column(col_index)];
+                                let cell = term_lock.grid_mut()[Line(row_index)][Column(col_index)];
                                 column.push((cell.clone(), true));
 
                                 //Add random chars...
-                                if cell.c != ' ' && row_index < lowest_char_changed_per_col[col_index] {
+                                if cell.c != ' '  && row_index < lowest_char_changed_per_col[col_index]
+                                {
                                     //TODO less random chars if many chars on that column relative to spaces....
                                     let ran_char_count = rand::thread_rng().gen_range(2, std::cmp::max(10, 3));
                                     for i in 0..ran_char_count
@@ -452,14 +475,14 @@ fn run(
                                     }
                                 }
                             }
-                            columns.push(column);
+                            term_lock.undo.columns.push(column);
                         }
                         println!("prep done");
                     }
 
                     //Step
                     let mut found = false;
-                    for col in &mut columns {
+                    for col in &mut *term_lock.undo.columns {
                         let mut index : usize = col.len() - 1;
                         for (_ch, real) in col.iter().rev() {
                             if !real || index == 0 {
@@ -490,18 +513,19 @@ fn run(
 
                     if found {
                         for col_index in 0..width {
-                            let col = &columns[col_index];
+                            let col_len = &term_lock.undo.columns[col_index].len();
                             for row in 0..height {
-                                let relative_index = (col.len() - height) + row;
-                                let (ch, _real) = columns[col_index][relative_index];
-                                grid[Line(row)][Column(col_index)] = ch;
+                                let relative_index = (col_len - height) + row;
+                                let (ch, _real) = term_lock.undo.columns[col_index][relative_index];
+                                term_lock.grid_mut()[Line(row)][Column(col_index)] = ch;
                             }
                         }
                     } else {
-                        if snapshots.is_empty() {
-                            //record the resting state, that we can calc diffs from it.
-                            snapshots.push(screen_shot(grid));
-                        }
+//                        if let None = snapshots {
+//                            println!("no snapshot - taking one.");
+//                            //record the resting state, that we can calc diffs from it.
+//                            snapshots = Some(screen_shot(term_lock.grid()));
+//                        }
                     }
                 }
 

@@ -795,6 +795,7 @@ pub struct Term {
     /// Proxy object for clearing displayed errors and warnings
     logger_proxy: Option<LoggerProxy>,
 
+    /// Data associated with matrix animation.
     pub undo: MatrixUndo,
 }
 
@@ -817,25 +818,9 @@ impl MatrixUndo {
     }
 }
 
-fn screen_shot(grid: &Grid<Cell>) -> Vec<Vec<Cell>> {
-    let mut original_columns = vec![];
-    println!("initialising");
-    let width = grid.num_cols().0;
-    let height = grid.num_lines().0;
-
-    for col_index in 0..width {
-        let mut column = Vec::new();
-        for row in 0..height {
-            column.push(grid[Line(row)][Column(col_index)].clone());
-        }
-        original_columns.push(column);
-    }
-    original_columns
-}
-
-fn reset_back_to_previous(term: &mut Term) { //grid: &mut Grid<Cell>, orig: &Vec<Vec<Cell>>, columns: &Vec<Vec<(Cell, bool)>>) {
-    let orig=  &term.undo.original_columns.clone();
-    let columns= &term.undo.columns.clone();
+fn reset_back_to_previous(term: &mut Term) {
+    let orig = &term.undo.original_columns.clone();
+    let columns = &term.undo.columns.clone();
     let grid = term.grid_mut();
     let height = grid.num_lines().0;
     let width = grid.num_cols().0;
@@ -843,14 +828,12 @@ fn reset_back_to_previous(term: &mut Term) { //grid: &mut Grid<Cell>, orig: &Vec
         for col_index in 0..width {
             let col = &columns[col_index];
             for row_index in 0..height {
-                let relative_index = (col.len() - height) + row_index;
-                //    println!("r{},c{}", relative_index, col_index);
+                let relative_index = std::cmp::max(col.len() - height, 0) + row_index;
 
                 let (matrix_ch, _real) = columns[col_index][relative_index];
                 let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
                 let original_ch = orig[col_index][row_index];
 
-                //todo: Suspicious
                 if current_screen_buffer_ch == matrix_ch.c && matrix_ch.c != original_ch.c {
                     //This char hasn't changed other than by us (probably?)
                     // - we should change it back to what it was...
@@ -860,35 +843,18 @@ fn reset_back_to_previous(term: &mut Term) { //grid: &mut Grid<Cell>, orig: &Vec
         }
     }
 
-   // println!("reset back to prev, about take snap: ");
-   // let snap  =screen_shot(grid);
-    //Reset
     term.undo.columns.clear();
-    //term.undo.original_columns = snap;
 }
 
 impl Term {
-    fn undo(&mut self) {
-        {
-            if !&self.undo.columns.is_empty() {
-                println!("change detected - undo called!");
-                reset_back_to_previous( self);
-                self.undo.last_change_detected = self.undo.tick;
-            }
+    fn undo(&mut self)
+    {
+        if !&self.undo.columns.is_empty() {
+            self.undo.last_change_detected = self.undo.tick;
+            reset_back_to_previous(self);
         }
-//        println!("undo called {:?}", &self.original_columns[0]);
-//        for col_index in 0..self.original_columns.len() {
-//            let col = &self.original_columns[col_index];
-//            for row_index in 0..col.len() {
-//                grid[Line(row_index)][Column(col_index)].c = col[row_index];
-//            }
-//        }
     }
 }
-
-//pub trait Undoable {
-//    fn undo();
-//}
 
 /// Terminal size info
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -1441,14 +1407,8 @@ impl ansi::Handler for Term {
     /// A character to be displayed
     #[inline]
     fn input(&mut self, c: char) {
-
-        print!("{}", c);
-
-        //TODO revert any in progress effects...
-//        if let Some(undo) = &self.undo.clone() {
-            self.undo();
-  //          self.undo = None;
-  //      }
+        // Revert any in progress animations...
+        self.undo();
 
         // If enabled, scroll to bottom when character is received
         if self.auto_scroll {

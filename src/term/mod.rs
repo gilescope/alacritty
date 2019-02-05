@@ -35,6 +35,8 @@ use crate::url::UrlParser;
 
 pub mod cell;
 pub mod color;
+pub mod animation;
+use self::animation::{MatrixUndo, undo};
 pub use self::cell::Cell;
 use self::cell::LineLength;
 
@@ -799,60 +801,7 @@ pub struct Term {
     pub undo: MatrixUndo,
 }
 
-#[derive(Clone)]
-pub struct MatrixUndo {
-    pub tick : u64,
-    pub last_change_detected : u64,
-    pub original_columns : Vec<Vec<Cell>>,
-    pub columns: Vec<Vec<(Cell, bool)>>,
-}
 
-impl MatrixUndo {
-    fn new() -> Self {
-        MatrixUndo {
-            tick: 0,
-            last_change_detected: 0,
-            original_columns: vec![],
-            columns: vec![]
-        }
-    }
-}
-
-
-impl Term {
-    fn undo(&mut self)
-    {
-        if self.undo.columns.is_empty() {
-            return;
-        }
-        self.undo.last_change_detected = self.undo.tick;
-        let orig = &self.undo.original_columns.clone();
-        let columns = &self.undo.columns.clone();
-        let grid = self.grid_mut();
-        let height = grid.num_lines().0;
-        let width = grid.num_cols().0;
-        if !orig.is_empty() {
-            for col_index in 0..width {
-                let col = &columns[col_index];
-                for row_index in 0..height {
-                    let relative_index = std::cmp::max(col.len() - height, 0) + row_index;
-
-                    let (matrix_ch, _real) = columns[col_index][relative_index];
-                    let current_screen_buffer_ch = grid[Line(row_index)][Column(col_index)].c;
-                    let original_ch = orig[col_index][row_index];
-
-                    if current_screen_buffer_ch == matrix_ch.c && matrix_ch.c != original_ch.c {
-                        //This char hasn't changed other than by us (probably?)
-                        // - we should change it back to what it was...
-                        grid[Line(row_index)][Column(col_index)] = orig[col_index][row_index];
-                    }
-                }
-            }
-        }
-
-        self.undo.columns.clear();
-    }
-}
 
 /// Terminal size info
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -1406,7 +1355,7 @@ impl ansi::Handler for Term {
     #[inline]
     fn input(&mut self, c: char) {
         // Revert any in progress animations...
-        self.undo();
+        undo( self);
 
         // If enabled, scroll to bottom when character is received
         if self.auto_scroll {
